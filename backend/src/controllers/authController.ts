@@ -1,11 +1,29 @@
 import { Request, Response } from 'express';
-import { Pool } from 'pg';
+import sqlite3 from 'sqlite3';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 
 export class AuthController {
-  constructor(private db: Pool) {}
+  constructor(private db: sqlite3.Database) {}
+
+  private getAsync(query: string, params: any[]): Promise<any> {
+    return new Promise((resolve, reject) => {
+      this.db.get(query, params, (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+  }
+
+  private runAsync(query: string, params: any[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.db.run(query, params, function(err) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
 
   async register(req: Request, res: Response) {
     try {
@@ -14,8 +32,8 @@ export class AuthController {
       const hashedPassword = await bcrypt.hash(password, 10);
       const id = uuidv4();
 
-      await this.db.query(
-        'INSERT INTO users (id, username, email, password_hash, role) VALUES ($1, $2, $3, $4, $5)',
+      await this.runAsync(
+        'INSERT INTO users (id, username, email, password_hash, role) VALUES (?, ?, ?, ?, ?)',
         [id, username, email, hashedPassword, 'admin']
       );
 
@@ -34,13 +52,12 @@ export class AuthController {
     try {
       const { email, password } = req.body;
 
-      const result = await this.db.query('SELECT * FROM users WHERE email = $1', [email]);
+      const user = await this.getAsync('SELECT * FROM users WHERE email = ?', [email]);
 
-      if (result.rows.length === 0) {
+      if (!user) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      const user = result.rows[0];
       const validPassword = await bcrypt.compare(password, user.password_hash);
 
       if (!validPassword) {
